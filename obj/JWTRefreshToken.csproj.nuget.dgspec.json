@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "D:\\Projects\\GitHub\\JWTRefreshToken\\JWTRefreshToken.csproj": {}
+    "d:\\Projects\\GitHub\\JWTRefreshToken\\JWTRefreshToken.csproj": {}
   },
   "projects": {
-    "D:\\Projects\\GitHub\\JWTRefreshToken\\JWTRefreshToken.csproj": {
+    "d:\\Projects\\GitHub\\JWTRefreshToken\\JWTRefreshToken.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "D:\\Projects\\GitHub\\JWTRefreshToken\\JWTRefreshToken.csproj",
+        "projectUniqueName": "d:\\Projects\\GitHub\\JWTRefreshToken\\JWTRefreshToken.csproj",
         "projectName": "JWTRefreshToken",
-        "projectPath": "D:\\Projects\\GitHub\\JWTRefreshToken\\JWTRefreshToken.csproj",
+        "projectPath": "d:\\Projects\\GitHub\\JWTRefreshToken\\JWTRefreshToken.csproj",
         "packagesPath": "C:\\Users\\alamk\\.nuget\\packages\\",
-        "outputPath": "D:\\Projects\\GitHub\\JWTRefreshToken\\obj\\",
+        "outputPath": "d:\\Projects\\GitHub\\JWTRefreshToken\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

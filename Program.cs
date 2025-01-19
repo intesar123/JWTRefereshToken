@@ -10,11 +10,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 
-builder.Services.AddControllers();
 
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
 
 //add SQL Server
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -23,7 +19,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 });
 
 builder
-    .Services.AddIdentity<IdentityUser, IdentityRole>(options =>
+    .Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
     {
         options.Password.RequireUppercase = true;
         options.Password.RequireDigit = true;
@@ -40,7 +36,7 @@ builder
     })
     .AddJwtBearer(o =>
     {
-        var Key = Encoding.UTF8.GetBytes(builder.Configuration["JWT:Key"]);
+        var Key = Encoding.UTF8.GetBytes(builder.Configuration["JWT:Secret"]);
         o.SaveToken = true;
         o.TokenValidationParameters = new TokenValidationParameters
         {
@@ -48,15 +44,20 @@ builder
             ValidateAudience = false,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer = builder.Configuration["JWT:Issuer"],
-            ValidAudience = builder.Configuration["JWT:Audience"],
+            ValidIssuer = builder.Configuration["JWT:ValidIssuer"],
+            ValidAudience = builder.Configuration["JWT:ValidAudience"],
             IssuerSigningKey = new SymmetricSecurityKey(Key),
             ClockSkew = TimeSpan.Zero,
         };
     });
 
 builder.Services.AddSingleton<IJWTManagerRepository, JWTManagerRepository>();
-builder.Services.AddScoped<IUserServiceRepository, UserServiceRepository>();
+
+builder.Services.AddControllers();
+
+// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 

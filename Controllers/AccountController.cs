@@ -19,16 +19,16 @@ public class AccountController : ControllerBase
     private readonly RoleManager<IdentityRole> _roleManager;
     private readonly IConfiguration _configuration;
 
-    private readonly IUserServiceRepository _userServiceRepository;
-
     public AccountController(
+        IConfiguration configuration,
         IJWTManagerRepository jWTManager,
-        IUserServiceRepository userServiceRepository,
-        IConfiguration configuration
+        UserManager<ApplicationUser> userManager,
+        RoleManager<IdentityRole> roleManager
     )
     {
         _jWTManager = jWTManager;
-        _userServiceRepository = userServiceRepository;
+        _userManager = userManager;
+        _roleManager = roleManager;
         _configuration = configuration;
     }
 
@@ -43,7 +43,7 @@ public class AccountController : ControllerBase
     [AllowAnonymous]
     [HttpPost]
     [Route("authenticate-user")]
-    public async Task<IActionResult> AuthenticateAsync(UserLogin usersdata)
+    public async Task<IActionResult> AuthenticateAsync([FromBody] UserLogin usersdata)
     {
         var user = await _userManager.FindByEmailAsync(usersdata.Email);
 
@@ -72,7 +72,7 @@ public class AccountController : ControllerBase
             user.RefreshToken = refreshToken;
             user.RefreshTokenExpiryTime = DateTime.Now.AddDays(refreshTokenValidityInDays);
 
-            await _userManager.UpdateAsync(user);
+            var retValue = await _userManager.UpdateAsync(user);
 
             return Ok(
                 new
@@ -90,7 +90,7 @@ public class AccountController : ControllerBase
     [AllowAnonymous]
     [HttpPost]
     [Route("refresh-token")]
-    public async Task<IActionResult> Refresh(Tokens token)
+    public async Task<IActionResult> Refresh([FromBody] Tokens token)
     {
         if (token is null)
         {
@@ -109,9 +109,13 @@ public class AccountController : ControllerBase
         string username = principal.Identity?.Name;
         var user = await _userManager.FindByNameAsync(username);
 
-        if (user is null || user.RefreshToken != refreshToken || user.RefreshTokenExpiryTime <= DateTime.Now)
+        if (
+            user is null
+            || user.RefreshToken != refreshToken
+            || user.RefreshTokenExpiryTime <= DateTime.Now
+        )
         {
-             return BadRequest("Invalid access token or refresh token");
+            return BadRequest("Invalid access token or refresh token");
         }
 
         var newAccessToken = _jWTManager.GenerateToken(principal.Claims.ToList());
@@ -129,10 +133,40 @@ public class AccountController : ControllerBase
         );
     }
 
+    [Authorize]
+    [HttpPost]
+    [Route("revoke/{email}")]
+    public async Task<IActionResult> Revoke(string email)
+    {
+        var user = await _userManager.FindByEmailAsync(email);
+        if (user == null)
+            return BadRequest("Invalid user email");
+
+        user.RefreshToken = null;
+        await _userManager.UpdateAsync(user);
+
+        return NoContent();
+    }
+
+    [Authorize]
+    [HttpPost]
+    [Route("revoke-all")]
+    public async Task<IActionResult> RevokeAll()
+    {
+        var users = _userManager.Users.ToList();
+        foreach (var user in users)
+        {
+            user.RefreshToken = null;
+            await _userManager.UpdateAsync(user);
+        }
+
+        return NoContent();
+    }
+
     [AllowAnonymous]
     [HttpPost]
     [Route("register-user")]
-    public async Task<IActionResult> RegisterAsync(UserRegister user)
+    public async Task<IActionResult> RegisterAsync([FromBody] UserRegister user)
     {
         var userExists = await _userManager.FindByEmailAsync(user.Email);
         if (userExists != null)
@@ -169,7 +203,7 @@ public class AccountController : ControllerBase
     [AllowAnonymous]
     [HttpPost]
     [Route("register-admin")]
-    public async Task<IActionResult> RegisterAdminAsync(UserRegister user)
+    public async Task<IActionResult> RegisterAdminAsync([FromBody] UserRegister user)
     {
         var userExists = await _userManager.FindByEmailAsync(user.Email);
         if (userExists != null)
