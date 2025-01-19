@@ -1,3 +1,4 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using JWTRefreshToken.Models;
 
@@ -5,8 +6,8 @@ namespace JWTRefreshToken.Repositories
 {
     public interface IJWTManagerRepository
     {
-        Tokens GenerateToken(string userName);
-        Tokens GenerateRefreshToken(string userName);
+        JwtSecurityToken GenerateToken(List<Claim> authClaims);
+        string GenerateRefreshToken();
         ClaimsPrincipal GetPrincipalFromExpiredToken(string token);
     }
 }

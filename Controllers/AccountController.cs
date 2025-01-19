@@ -1,6 +1,10 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Threading.Tasks;
 using JWTRefreshToken.Models;
 using JWTRefreshToken.Repositories;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 
 namespace JWTRefreshToken.Controllers;
@@ -11,15 +15,21 @@ namespace JWTRefreshToken.Controllers;
 public class AccountController : ControllerBase
 {
     private readonly IJWTManagerRepository _jWTManager;
+    private readonly UserManager<ApplicationUser> _userManager;
+    private readonly RoleManager<IdentityRole> _roleManager;
+    private readonly IConfiguration _configuration;
+
     private readonly IUserServiceRepository _userServiceRepository;
 
     public AccountController(
         IJWTManagerRepository jWTManager,
-        IUserServiceRepository userServiceRepository
+        IUserServiceRepository userServiceRepository,
+        IConfiguration configuration
     )
     {
         _jWTManager = jWTManager;
         _userServiceRepository = userServiceRepository;
+        _configuration = configuration;
     }
 
     [HttpGet]
@@ -35,64 +45,180 @@ public class AccountController : ControllerBase
     [Route("authenticate-user")]
     public async Task<IActionResult> AuthenticateAsync(UserLogin usersdata)
     {
-        var validUser = await _userServiceRepository.IsValidUserAsync(usersdata);
+        var user = await _userManager.FindByEmailAsync(usersdata.Email);
 
-        if (!validUser)
+        if (user != null && await _userManager.CheckPasswordAsync(user, usersdata.Password))
         {
-            return Unauthorized("Invalid username or password...");
+            var UserRoles = await _userManager.GetRolesAsync(user);
+
+            var authClaims = new List<Claim>
+            {
+                new Claim(ClaimTypes.Name, user.Email),
+                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            };
+
+            foreach (var userRole in UserRoles)
+            {
+                authClaims.Add(new Claim(ClaimTypes.Role, userRole));
+            }
+
+            var token = _jWTManager.GenerateToken(authClaims);
+            var refreshToken = _jWTManager.GenerateRefreshToken();
+            _ = int.TryParse(
+                _configuration["JWT:RefreshTokenValidityInDays"],
+                out int refreshTokenValidityInDays
+            );
+
+            user.RefreshToken = refreshToken;
+            user.RefreshTokenExpiryTime = DateTime.Now.AddDays(refreshTokenValidityInDays);
+
+            await _userManager.UpdateAsync(user);
+
+            return Ok(
+                new
+                {
+                    AccessToken = new JwtSecurityTokenHandler().WriteToken(token),
+                    RefreshToken = refreshToken,
+                    Expiration = token.ValidTo,
+                }
+            );
         }
 
-        var token = _jWTManager.GenerateToken(usersdata.Email);
-
-        if (token == null)
-        {
-            return Unauthorized("Invalid Attempt..");
-        }
-
-        UserRefreshTokens obj = new UserRefreshTokens
-        {
-            RefreshToken = token.RefreshToken,
-            UserName = usersdata.Email,
-        };
-
-        _userServiceRepository.AddUserRefreshTokens(obj);
-        return Ok(token);
+        return Unauthorized();
     }
 
     [AllowAnonymous]
     [HttpPost]
     [Route("refresh-token")]
-    public IActionResult Refresh(Tokens token)
+    public async Task<IActionResult> Refresh(Tokens token)
     {
-        var principal = _jWTManager.GetPrincipalFromExpiredToken(token.AccessToken);
-        var username = principal.Identity?.Name;
+        if (token is null)
+        {
+            return BadRequest("Invalid client request");
+        }
 
-        var savedRefreshToken = _userServiceRepository.GetSavedRefreshToken(
-            username,
-            token.RefreshToken
+        string? accessToken = token.AccessToken;
+        string? refreshToken = token.RefreshToken;
+
+        var principal = _jWTManager.GetPrincipalFromExpiredToken(accessToken);
+        if (principal is null)
+        {
+            return BadRequest("Invalid access token or refresh token");
+        }
+
+        string username = principal.Identity?.Name;
+        var user = await _userManager.FindByNameAsync(username);
+
+        if (user is null || user.RefreshToken != refreshToken || user.RefreshTokenExpiryTime <= DateTime.Now)
+        {
+             return BadRequest("Invalid access token or refresh token");
+        }
+
+        var newAccessToken = _jWTManager.GenerateToken(principal.Claims.ToList());
+        var newRefreshToken = _jWTManager.GenerateRefreshToken();
+
+        user.RefreshToken = newRefreshToken;
+        await _userManager.UpdateAsync(user);
+
+        return new ObjectResult(
+            new
+            {
+                AccessToken = new JwtSecurityTokenHandler().WriteToken(newAccessToken),
+                RefreshToken = newRefreshToken,
+            }
         );
+    }
 
-        if (savedRefreshToken.RefreshToken != token.RefreshToken)
+    [AllowAnonymous]
+    [HttpPost]
+    [Route("register-user")]
+    public async Task<IActionResult> RegisterAsync(UserRegister user)
+    {
+        var userExists = await _userManager.FindByEmailAsync(user.Email);
+        if (userExists != null)
         {
-            return Unauthorized("Invalid attempt!");
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new Response { Status = "Error", Message = "User already exists!" }
+            );
         }
 
-        var newJwtToken = _jWTManager.GenerateRefreshToken(username);
-
-        if (newJwtToken == null)
+        ApplicationUser appUser = new()
         {
-            return Unauthorized("Invalid attempt!");
-        }
-
-        UserRefreshTokens obj = new UserRefreshTokens
-        {
-            RefreshToken = newJwtToken.RefreshToken,
-            UserName = username,
+            Email = user.Email,
+            SecurityStamp = Guid.NewGuid().ToString(),
+            UserName = user.Email,
         };
 
-        _userServiceRepository.DeleteUserRefreshTokens(username, token.RefreshToken);
-        _userServiceRepository.AddUserRefreshTokens(obj);
+        var result = await _userManager.CreateAsync(appUser, user.Password);
+        if (!result.Succeeded)
+        {
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new Response
+                {
+                    Status = "Error",
+                    Message = "User creation failed! Please check user details and try again.",
+                }
+            );
+        }
 
-        return Ok(newJwtToken);
+        return Ok("User created successfully!");
+    }
+
+    [AllowAnonymous]
+    [HttpPost]
+    [Route("register-admin")]
+    public async Task<IActionResult> RegisterAdminAsync(UserRegister user)
+    {
+        var userExists = await _userManager.FindByEmailAsync(user.Email);
+        if (userExists != null)
+        {
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new Response { Status = "Error", Message = "User already exists!" }
+            );
+        }
+
+        ApplicationUser appUser = new()
+        {
+            Email = user.Email,
+            SecurityStamp = Guid.NewGuid().ToString(),
+            UserName = user.Email,
+        };
+
+        var result = await _userManager.CreateAsync(appUser, user.Password);
+        if (!result.Succeeded)
+        {
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new Response
+                {
+                    Status = "Error",
+                    Message = "User creation failed! Please check user details and try again.",
+                }
+            );
+        }
+
+        if (!await _roleManager.RoleExistsAsync(UserRoles.Admin))
+        {
+            await _roleManager.CreateAsync(new IdentityRole(UserRoles.Admin));
+        }
+        if (!await _roleManager.RoleExistsAsync(UserRoles.User))
+        {
+            await _roleManager.CreateAsync(new IdentityRole(UserRoles.User));
+        }
+
+        if (await _roleManager.RoleExistsAsync(UserRoles.Admin))
+        {
+            await _userManager.AddToRoleAsync(appUser, UserRoles.Admin);
+        }
+
+        if (await _roleManager.RoleExistsAsync(UserRoles.User))
+        {
+            await _userManager.AddToRoleAsync(appUser, UserRoles.User);
+        }
+
+        return Ok(new Response { Status = "Success", Message = "User created successfully!" });
     }
 }
